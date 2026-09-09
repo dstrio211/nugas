@@ -20,6 +20,26 @@ let weekOnly = false;
 let authMode = "signin";
 let editingTask = null;
 let viewToken = 0;
+let launchRevealed = false;
+let launchAnimation = null;
+function revealLaunch() {
+  if (launchRevealed) return;
+  launchRevealed = true;
+  if (isReduced() || !app.animate) return;
+  launchAnimation = app.animate(
+    [{ opacity: 0 }, { opacity: 1 }],
+    { duration: 480, easing: "cubic-bezier(.22,.61,.36,1)" }
+  );
+  const animation = launchAnimation;
+  animation.finished.catch(() => {}).finally(() => {
+    if (launchAnimation === animation) launchAnimation = null;
+  });
+}
+// An early tap or app switch should leave the content fully visible.
+document.addEventListener("pointerdown", () => launchAnimation?.cancel(), { passive: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) launchAnimation?.cancel();
+});
 let route = { kind: "dashboard" };
 let navDepth = 0;
 const pageSnapshots = new Map();
@@ -231,6 +251,7 @@ function authView(message = "") {
     authView();
   };
   document.querySelector("#auth-form").onsubmit = handleAuth;
+  revealLaunch();
 }
 
 async function handleAuth(event) {
@@ -308,6 +329,7 @@ function renderApp() {
     await supabase.auth.signOut();
   };
   showDashboard();
+  revealLaunch();
 }
 
 function toggleProfile() {
