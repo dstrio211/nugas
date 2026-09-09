@@ -16,11 +16,12 @@ let user = null;
 let profile = null;
 let tasks = [];
 let archive = false;
-let todayOnly = false;
+let weekOnly = false;
 let authMode = "signin";
 let editingTask = null;
 let viewToken = 0;
 let sessionSyncToken = 0;
+let sessionLoading = false;
 
 const esc = (value = "") =>
   String(value).replace(
@@ -293,9 +294,25 @@ async function swapView(render, direction = "forward") {
   }
 }
 
-function todayCount() {
-  return tasks.filter((t) => !t.completed_at && deadlineDate(t) === today())
-    .length;
+function isThisWeek(task, now = new Date()) {
+  const day = new Date(localDate(now) + "T00:00:00Z");
+  const offset = (day.getUTCDay() + 6) % 7;
+  const start = day.getTime() - offset * 86400000;
+  const due = Date.parse(deadlineDate(task) + "T00:00:00Z");
+  return due >= start && due < start + 7 * 86400000;
+}
+function statusClass(task) {
+  if (task.completed_at) return "status-done";
+  return (
+    {
+      "Belum mulai": "status-idle",
+      Dikerjakan: "status-working",
+      "Siap dikumpulkan": "status-ready",
+    }[task.status] || ""
+  );
+}
+function weekCount() {
+  return tasks.filter((t) => !t.completed_at && isThisWeek(t)).length;
 }
 function courseList() {
   return [...new Set(tasks.map((t) => courseName(t.course)))].sort((a, b) =>
@@ -305,25 +322,25 @@ function courseList() {
 
 function showDashboard() {
   archive = false;
-  todayOnly = false;
+  weekOnly = false;
   swapView(renderDashboard, "back");
 }
 function renderDashboard() {
   const active = tasks.filter((t) => !t.completed_at);
-  const count = todayCount();
+  const count = weekCount();
   const view = document.querySelector("#view");
-  view.innerHTML = `<section class="dashboard"><div class="hero"><div><div class="date-line">${new Intl.DateTimeFormat("id-ID", { timeZone, weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date())}</div><div class="count">${active.length}</div><h1>Tugas belum dikumpulkan</h1></div><button class="primary add-button" id="add">+ Tambah tugas</button></div><button class="deadline-banner ${count === 0 ? "zero" : ""}" id="today-banner" ${count === 0 ? "disabled" : ""}>${count === 0 ? `<b>0 TUGAS DEADLINE HARI INI</b>` : `<span><b>${count} TUGAS DEADLINE HARI INI</b><small>Lihat yang perlu dikumpulkan</small></span><span>↗</span>`}</button><div class="tabs"><button id="active-tab" class="active">Tugas aktif</button><button id="archive-tab">Arsip · ${tasks.filter((t) => t.completed_at).length}</button></div><div id="tab-area"><div class="tools"><input id="search" type="search" placeholder="Cari tugas…" aria-label="Cari tugas"><select id="course-filter" aria-label="Filter mata kuliah"><option value="">Semua mata kuliah</option>${courseList()
+  view.innerHTML = `<section class="dashboard"><div class="hero"><div><div class="date-line">${new Intl.DateTimeFormat("id-ID", { timeZone, weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date())}</div><div class="count">${active.length}</div><h1>Tugas belum dikumpulkan</h1></div><button class="primary add-button" id="add">+ Tambah tugas</button></div><button class="deadline-banner ${count === 0 ? "zero" : ""}" id="week-banner" ${count === 0 ? "disabled" : ""}>${count === 0 ? `<b>0 TUGAS DEADLINE MINGGU INI</b>` : `<span><b>${count} TUGAS DEADLINE MINGGU INI</b><small>Lihat yang perlu dikumpulkan</small></span><span>↗</span>`}</button><div class="tabs"><button id="active-tab" class="active">Tugas aktif</button><button id="archive-tab">Arsip · ${tasks.filter((t) => t.completed_at).length}</button></div><div id="tab-area"><div class="tools"><input id="search" type="search" placeholder="Cari tugas…" aria-label="Cari tugas"><select id="course-filter" aria-label="Filter mata kuliah"><option value="">Semua mata kuliah</option>${courseList()
     .map((c) => `<option value="${esc(c)}">${esc(c)}</option>`)
     .join("")}</select></div><div id="list"></div></div></section>`;
   document.querySelector("#add").onclick = () => showForm();
-  document.querySelector("#today-banner").onclick = () => {
-    todayOnly = !todayOnly;
-    document.querySelector("#today-banner").innerHTML =
+  document.querySelector("#week-banner").onclick = () => {
+    weekOnly = !weekOnly;
+    document.querySelector("#week-banner").innerHTML =
       `<b class="all-tasks">Tampilkan semua tugas</b><span>↗</span>`;
-    document.querySelector("#today-banner").classList.add("all");
+    document.querySelector("#week-banner").classList.add("all");
     renderList();
-    document.querySelector("#today-banner").onclick = () => {
-      todayOnly = false;
+    document.querySelector("#week-banner").onclick = () => {
+      weekOnly = false;
       renderDashboard();
     };
   };
@@ -337,7 +354,7 @@ function renderDashboard() {
 async function switchArchive(next) {
   if (archive === next) return;
   archive = next;
-  todayOnly = false;
+  weekOnly = false;
   const area = document.querySelector("#tab-area");
   document.querySelector("#active-tab").classList.toggle("active", !archive);
   document.querySelector("#archive-tab").classList.toggle("active", archive);
@@ -379,7 +396,7 @@ function renderList() {
   const selected = tasks.filter(
     (t) =>
       Boolean(t.completed_at) === archive &&
-      (!todayOnly || deadlineDate(t) === today()) &&
+      (!weekOnly || isThisWeek(t)) &&
       (!course || courseName(t.course) === course) &&
       `${t.title} ${t.course} ${t.notes}`.toLowerCase().includes(q),
   );
@@ -387,7 +404,7 @@ function renderList() {
     ? selected
         .map(
           (t) =>
-            `<button class="task-card ${urgency(t)}" data-id="${t.id}"><span class="task-main"><strong>${esc(t.title)}</strong><span class="course">${esc(courseName(t.course))} · ${esc(t.task_type)}</span>${t.task_type === "Kelompok" && t.members ? `<span class="members">${esc(membersShort(t.members))}</span>` : ""}</span><span class="status">${t.completed_at ? "✓ Sudah dikumpulkan" : esc(t.status)}</span><span class="due"><b>${!t.completed_at && daysUntil(t) <= 4 ? "⚠️ " : ""}${deadlineText(t)}</b><small>${timeLabel(t.deadline_at)}</small></span></button>`,
+            `<button class="task-card ${urgency(t)}" data-id="${t.id}"><span class="task-main"><strong>${esc(t.title)}</strong><span class="course">${esc(courseName(t.course))} · ${esc(t.task_type)}</span>${t.task_type === "Kelompok" && t.members ? `<span class="members">${esc(membersShort(t.members))}</span>` : ""}</span><span class="status ${statusClass(t)}">${t.completed_at ? "✓ Sudah dikumpulkan" : esc(t.status)}</span><span class="due"><b>${!t.completed_at && daysUntil(t) <= 4 ? "⚠️ " : ""}${deadlineText(t)}</b><small>${timeLabel(t.deadline_at)}</small></span></button>`,
         )
         .join("")
     : `<div class="empty">${archive ? "Belum ada tugas di arsip." : "Belum ada tugas di sini."}</div>`;
@@ -445,7 +462,7 @@ function renderForm(task) {
   const type = value("task_type", "Individual");
   view.innerHTML = `<div class="detail-nav"><button class="back" id="back" aria-label="Kembali">‹</button></div><article class="detail-card form-card"><h1>${isEdit ? "Edit tugas" : `Nugas apa lagi nih, ${esc(profileName())}?`}</h1><form id="task-form"><div class="form-grid"><label>Nama tugas<input name="title" maxlength="180" required value="${esc(value("title"))}" placeholder="Contoh: laporan observasi"></label><label>Mata kuliah<input name="course" maxlength="120" required value="${esc(value("course"))}" placeholder="Contoh: Algorithm and Programming"></label><label>Tanggal ditugaskan<input name="assigned_date" type="date" required value="${esc(value("assigned_date", today()))}"></label><label>Deadline (WIB)<input name="deadline_at" type="datetime-local" required value="${esc(task ? datetimeInput(task.deadline_at) : value("deadline_at"))}"></label><label>Jenis tugas<select name="task_type" id="type"><option ${type === "Individual" ? "selected" : ""}>Individual</option><option ${type === "Kelompok" ? "selected" : ""}>Kelompok</option></select></label><label id="members-wrap" ${type === "Kelompok" ? "" : "hidden"}>Anggota kelompok<input name="members" value="${esc(value("members"))}" placeholder="Pisahkan nama dengan koma"></label></div><label>Catatan<textarea name="notes" rows="4" placeholder="Catatan atau link, misalnya https://www.canva.com/…">${esc(value("notes"))}</textarea></label><button class="primary save" type="submit">${isEdit ? "Simpan perubahan" : "Simpan tugas"}</button></form></article>`;
   document.querySelector("#back").onclick = () =>
-    isEdit ? showDetail(task.id) : showDashboard;
+    isEdit ? showDetail(task.id) : showDashboard();
   const form = document.querySelector("#task-form");
   const saveDraft = () =>
     !isEdit && writeDraft(Object.fromEntries(new FormData(form)));
@@ -472,35 +489,42 @@ async function saveTask(event) {
     deadline_at: new Date(`${raw.deadline_at}:00+07:00`).toISOString(),
   };
   const button = form.querySelector("button[type=submit]");
+  if (button.disabled) return;
   button.disabled = true;
-  let result;
-  if (editingTask)
-    result = await supabase
-      .from("tasks")
-      .update(payload)
-      .eq("id", editingTask.id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
-  else
-    result = await supabase
-      .from("tasks")
-      .insert({ ...payload, user_id: user.id })
-      .select()
-      .single();
-  button.disabled = false;
-  if (result.error) {
-    showToast(result.error.message);
-    return;
+  const originalLabel = button.textContent;
+  button.textContent = "Menyimpan…";
+  try {
+    let result;
+    if (editingTask)
+      result = await supabase
+        .from("tasks")
+        .update(payload)
+        .eq("id", editingTask.id)
+        .eq("user_id", user.id)
+        .select()
+        .single();
+    else
+      result = await supabase
+        .from("tasks")
+        .insert({ ...payload, user_id: user.id })
+        .select()
+        .single();
+    if (result.error) throw result.error;
+    if (editingTask)
+      tasks = tasks.map((t) => (t.id === result.data.id ? result.data : t));
+    else tasks.push(result.data);
+    if (!editingTask) clearDraft();
+    editingTask = null;
+    button.textContent = "Tersimpan!";
+    button.classList.add("saved");
+    showDetail(result.data.id);
+    showToast("Tugas tersimpan");
+  } catch (error) {
+    showToast(error.message || "Belum berhasil menyimpan. Coba lagi.");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
   }
-  if (editingTask)
-    tasks = tasks.map((t) => (t.id === result.data.id ? result.data : t));
-  else tasks.push(result.data);
-  if (!editingTask) clearDraft();
-  editingTask = null;
-  button.textContent = "Tersimpan!";
-  button.classList.add("saved");
-  setTimeout(() => showDetail(result.data.id), 550);
 }
 
 async function updateTask(id, changes, goHome = true) {
@@ -554,25 +578,43 @@ function confirmDelete(task) {
   const host = document.querySelector("#delete-area");
   host.innerHTML = `<div class="delete-confirm"><h2>Hapus tugas ini selamanya?</h2><p>“${esc(task.title)}” tidak bisa dikembalikan setelah dihapus.</p><div><button id="cancel-delete">Batal</button><button class="danger" id="confirm-delete">Ya, hapus permanen</button></div></div>`;
   document.querySelector("#cancel-delete").onclick = () => renderDetail(task);
-  document.querySelector("#confirm-delete").onclick = async () => {
-    const { error } = await supabase
-      .from("tasks")
-      .delete()
-      .eq("id", task.id)
-      .eq("user_id", user.id);
-    if (error) {
-      showToast(error.message);
-      return;
+  document.querySelector("#confirm-delete").onclick = async (event) => {
+    const button = event.currentTarget;
+    if (button.disabled) return;
+    button.disabled = true;
+    button.textContent = "Menghapus…";
+    try {
+      const { error } = await supabase
+        .from("tasks")
+        .delete()
+        .eq("id", task.id)
+        .eq("user_id", user.id);
+      if (error) throw error;
+      tasks = tasks.filter((t) => t.id !== task.id);
+      showDashboard();
+      showToast("Tugas dihapus permanen");
+    } catch (error) {
+      showToast(error.message || "Belum berhasil menghapus. Coba lagi.");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Ya, hapus permanen";
     }
-    tasks = tasks.filter((t) => t.id !== task.id);
-    showDashboard();
-    showToast("Tugas dihapus permanen");
   };
 }
 
 async function syncSession(session) {
+  const nextUser = session?.user || null;
+  if (
+    nextUser &&
+    user?.id === nextUser.id &&
+    (document.querySelector("#view") || sessionLoading)
+  ) {
+    user = nextUser;
+    return;
+  }
   const token = ++sessionSyncToken;
-  user = session?.user || null;
+  user = nextUser;
+  sessionLoading = Boolean(user);
   if (!user) {
     profile = null;
     tasks = [];
@@ -585,6 +627,8 @@ async function syncSession(session) {
     if (token === sessionSyncToken) renderApp();
   } catch (error) {
     if (token === sessionSyncToken) authView(error.message);
+  } finally {
+    if (token === sessionSyncToken) sessionLoading = false;
   }
 }
 

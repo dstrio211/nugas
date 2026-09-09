@@ -337,6 +337,25 @@ label select {
   font-size: 12px;
   text-align: right;
 }
+.status-idle {
+  color: #fff;
+  border: 1px solid #e15a66;
+  background: linear-gradient(135deg, #c93b49, #a92331);
+}
+.status-working {
+  color: #231304;
+  border: 1px solid #ffbf74;
+  background: #f5a044;
+}
+.status-ready {
+  color: #282006;
+  border: 1px solid #f8df83;
+  background: #eccc59;
+}
+.status-done {
+  color: #c6f8db;
+  background: #234c38;
+}
 .due b {
   display: block;
   margin-bottom: 5px;
