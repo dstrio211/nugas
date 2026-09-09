@@ -298,28 +298,22 @@ label select {
   min-width: 0;
 }
 .task-main strong {
-  display: -webkit-box;
+  display: block;
   overflow: hidden;
   font-size: 16px;
   font-weight: 700;
   line-height: 1.25;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-.course {
-  display: flex;
-  margin-top: 8px;
-  color: #aeb7b3;
-  font-size: 12px;
   white-space: nowrap;
-}
-.course-name {
-  min-width: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
 }
-.task-type {
-  flex: none;
+.course {
+  display: block;
+  margin-top: 8px;
+  overflow: hidden;
+  color: #aeb7b3;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .members {
   display: block;
@@ -817,23 +811,43 @@ label select {
     max-width: none;
   }
   .task-card {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
     padding: 16px;
   }
-  .task-card .status {
+  .task-card .task-main { display: contents; }
+  .task-card .task-main strong {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-width: 0;
+  }
+  .task-card .course {
     grid-column: 1;
     grid-row: 2;
+    min-width: 0;
+    margin-top: 0;
+  }
+  .task-card .members {
+    grid-column: 1;
+    grid-row: 3;
+    min-width: 0;
+    margin-top: 0;
+  }
+  .task-card .status {
+    grid-column: 1;
+    grid-row: 3;
     margin-top: -4px;
     padding: 7px 10px;
     font-size: 13px;
     font-weight: 650;
   }
+  .task-card:has(.members) .status { grid-row: 4; }
   .task-card .due {
     grid-column: 2;
-    grid-row: 1 / 3;
+    grid-row: 2 / 4;
     max-width: 106px;
   }
+  .task-card:has(.members) .due { grid-row: 2 / 5; }
   .facts,
   .facts.archive-facts,
   .form-grid {
