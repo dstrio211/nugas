@@ -304,8 +304,10 @@ function swapView(render, direction = "forward") {
   view.getAnimations().forEach(a => a.cancel());
   view.style.transform = "";
   render();
-  window.scrollTo(0, route.kind === "dashboard" ? dashboardState.y : 0);
-  if (!isReduced() && view.animate) {
+  window.scrollTo({ top: route.kind === "dashboard" ? dashboardState.y : 0, behavior: "instant" });
+  // History back already supplies the swipe transition on iOS.
+  // Render its destination fully opaque, without a second entrance fade.
+  if (direction !== "back" && !isReduced() && view.animate) {
     const animation = view.animate([
       { opacity: 0.6, transform: direction === "back" ? "translateX(-22px)" : "translateX(32px)" },
       { opacity: 1, transform: "translateX(0)" }
@@ -703,9 +705,13 @@ function finishEdgeSwipe(cancelled = false) {
   edgeSwipe = null;
   if (!g?.active) return;
   const commit = !cancelled && g.dx > Math.min(120, innerWidth * .3);
+  if (commit) {
+    // Keep the dragged position until popstate replaces the view.
+    goBack();
+    return;
+  }
   g.view.style.transform = "";
-  if (commit) goBack();
-  else if (!isReduced()) {
+  if (!isReduced()) {
     const a = g.view.animate([{ transform: `translateX(${g.dx}px)` }, { transform: "translateX(0)" }],
       { duration: 180, easing: "ease-out" });
     a.finished.catch(() => {});
