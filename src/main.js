@@ -22,6 +22,8 @@ let editingTask = null;
 let viewToken = 0;
 let route = { kind: "dashboard" };
 let navDepth = 0;
+const pageSnapshots = new Map();
+let backMotion = null;
 let dashboardState = { y: 0, archive: false, weekOnly: false, search: "", course: "" };
 history.scrollRestoration = "manual";
 
@@ -32,15 +34,33 @@ function rememberDashboard() {
     course: document.querySelector("#course-filter")?.value || "" };
 }
 function openRoute(next) {
+  if (backMotion) return;
   rememberDashboard();
+  pageSnapshots.set(navDepth, capturePage());
   route = next;
   history.pushState({ nugas: true, route, depth: ++navDepth }, "");
 }
 function goBack() {
+  if (backMotion) return;
+  if (!isReduced() && pageSnapshots.has(navDepth - 1)) {
+    startBackMotion();
+    settleBackMotion(true);
+    return;
+  }
+  performHistoryBack();
+}
+function performHistoryBack() {
   if (navDepth > 0 && history.state?.nugas) history.back();
   else showDashboard();
 }
 window.addEventListener("popstate", event => {
+  if (backMotion) {
+    const motion = backMotion;
+    // Keep the previous page covering the viewport through render and scroll restoration.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (backMotion === motion) cleanupBackMotion();
+    }));
+  }
   if (!user || !document.querySelector("#view")) return;
   const state = event.state;
   navDepth = state?.nugas ? state.depth : 0;
@@ -677,45 +697,113 @@ if ("serviceWorker" in navigator)
     navigator.serviceWorker.register("/sw.js"),
   );
 
+
+function capturePage() {
+  const node = document.querySelector(".app")?.cloneNode(true);
+  if (!node) return null;
+  // Visual copies must never intercept form queries or expose duplicate IDs.
+  node.querySelectorAll("[id]").forEach(el => el.removeAttribute("id"));
+  node.querySelectorAll("input, textarea, select").forEach((el, i) => {
+    el.value = document.querySelectorAll(".app input, .app textarea, .app select")[i]?.value || "";
+  });
+  return { node, y: scrollY };
+}
+function pageLayer(snapshot) {
+  const layer = document.createElement("div");
+  layer.className = "nav-motion-layer";
+  layer.setAttribute("aria-hidden", "true");
+  layer.inert = true;
+  const content = document.createElement("div");
+  content.style.transform = `translateY(-${snapshot.y}px)`;
+  content.append(snapshot.node.cloneNode(true));
+  layer.append(content);
+  return layer;
+}
+function startBackMotion() {
+  if (backMotion) return false;
+  const target = pageSnapshots.get(navDepth - 1);
+  const current = capturePage();
+  if (!target || !current) return false;
+  document.querySelector("#view")?.getAnimations().forEach(a => a.cancel());
+  const host = document.createElement("div");
+  host.className = "nav-motion";
+  const under = pageLayer(target), over = pageLayer(current);
+  over.classList.add("nav-motion-front");
+  host.append(under, over);
+  document.body.append(host);
+  backMotion = { host, under, over, dx: 0, width: innerWidth, settling: false };
+  moveBackMotion(0);
+  return true;
+}
+function moveBackMotion(dx) {
+  const m = backMotion;
+  if (!m) return;
+  m.dx = Math.max(0, Math.min(m.width, dx));
+  m.over.style.transform = `translateX(${m.dx}px)`;
+  m.under.style.transform = `translateX(${-m.width * .22 * (1 - m.dx / m.width)}px)`;
+}
+function cleanupBackMotion() {
+  backMotion?.host.remove();
+  backMotion = null;
+}
+async function settleBackMotion(commit) {
+  const m = backMotion;
+  if (!m || m.settling) return;
+  m.settling = true;
+  const end = commit ? m.width : 0;
+  const duration = isReduced() ? 0 : Math.max(140, Math.min(320, Math.abs(end - m.dx) * .65));
+  const options = { duration, easing: "cubic-bezier(.22,.8,.25,1)", fill: "forwards" };
+  const animations = [
+    m.over.animate([{ transform: `translateX(${m.dx}px)` }, { transform: `translateX(${end}px)` }], options),
+    m.under.animate([{ transform: m.under.style.transform },
+      { transform: `translateX(${commit ? 0 : -m.width * .22}px)` }], options)
+  ];
+  await Promise.all(animations.map(a => a.finished.catch(() => {})));
+  if (backMotion !== m) return;
+  if (commit) performHistoryBack();
+  else cleanupBackMotion();
+}
+
 let edgeSwipe = null;
 const standalone = () => navigator.standalone || matchMedia("(display-mode: standalone)").matches;
 document.addEventListener("touchstart", e => {
-  if (!standalone() || route.kind === "dashboard" || e.touches.length !== 1) return;
-  const touch = e.touches[0];
-  if (touch.clientX > 28 || e.target.closest("input, textarea, select")) return;
-  edgeSwipe = { x: touch.clientX, y: touch.clientY, dx: 0, active: false,
-    view: document.querySelector("#view") };
+  if (backMotion || !standalone() || route.kind === "dashboard" || e.touches.length !== 1) return;
+  const t = e.touches[0];
+  if (t.clientX > 28 || e.target.closest("input, textarea, select, button")) return;
+  edgeSwipe = { x: t.clientX, y: t.clientY, dx: 0, lastX: t.clientX,
+    time: performance.now(), velocity: 0, active: false };
 }, { passive: true });
 document.addEventListener("touchmove", e => {
-  if (!edgeSwipe) return;
-  const g = edgeSwipe, t = e.touches[0];
-  const dx = t.clientX - g.x, dy = t.clientY - g.y;
+  const g = edgeSwipe;
+  if (!g) return;
+  if (e.touches.length !== 1) { finishEdgeSwipe(true); return; }
+  const t = e.touches[0], dx = t.clientX - g.x, dy = t.clientY - g.y;
   if (!g.active && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { edgeSwipe = null; return; }
   if (!g.active && dx > 10 && dx > Math.abs(dy) * 1.4) {
+    if (!startBackMotion()) { edgeSwipe = null; return; }
     g.active = true;
-    g.view.getAnimations().forEach(a => a.cancel());
   }
   if (!g.active) return;
+  if (!e.cancelable) { finishEdgeSwipe(true); return; }
   e.preventDefault();
-  g.dx = Math.max(0, dx);
-  g.view.style.transform = `translateX(${g.dx}px)`;
+  const now = performance.now();
+  g.velocity = (t.clientX - g.lastX) / Math.max(1, now - g.time);
+  g.lastX = t.clientX; g.time = now; g.dx = Math.max(0, dx);
+  moveBackMotion(g.dx);
 }, { passive: false });
 function finishEdgeSwipe(cancelled = false) {
   const g = edgeSwipe;
   edgeSwipe = null;
   if (!g?.active) return;
-  const commit = !cancelled && g.dx > Math.min(120, innerWidth * .3);
-  if (commit) {
-    // Keep the dragged position until popstate replaces the view.
-    goBack();
-    return;
-  }
-  g.view.style.transform = "";
-  if (!isReduced()) {
-    const a = g.view.animate([{ transform: `translateX(${g.dx}px)` }, { transform: "translateX(0)" }],
-      { duration: 180, easing: "ease-out" });
-    a.finished.catch(() => {});
-  }
+  const velocity = performance.now() - g.time < 100 ? g.velocity : 0;
+  const commit = !cancelled && (g.dx > innerWidth * .36 || (g.dx > 45 && velocity > .5));
+  settleBackMotion(commit);
 }
 document.addEventListener("touchend", () => finishEdgeSwipe(), { passive: true });
 document.addEventListener("touchcancel", () => finishEdgeSwipe(true), { passive: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) finishEdgeSwipe(true);
+});
+window.addEventListener("resize", () => {
+  finishEdgeSwipe(true);
+});

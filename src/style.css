@@ -8,6 +8,22 @@
   font-synthesis: none;
   color-scheme: dark;
 }
+.nav-motion {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  overflow: hidden;
+  background: #111315;
+  touch-action: none;
+}
+.nav-motion-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #111315;
+  will-change: transform;
+}
+.nav-motion-front { box-shadow: -10px 0 32px #0005; }
 * {
   box-sizing: border-box;
 }
@@ -842,6 +858,9 @@ label select {
     font-weight: 650;
   }
   .task-card:has(.members) .status { grid-row: 4; }
+  .task-card:not(:has(.members)) .status {
+    margin-top: 8px;
+  }
   .task-card .due {
     grid-column: 2;
     grid-row: 2 / 4;
