@@ -20,6 +20,43 @@ let weekOnly = false;
 let authMode = "signin";
 let editingTask = null;
 let viewToken = 0;
+let route = { kind: "dashboard" };
+let navDepth = 0;
+let dashboardState = { y: 0, archive: false, weekOnly: false, search: "", course: "" };
+history.scrollRestoration = "manual";
+
+function rememberDashboard() {
+  if (route.kind !== "dashboard") return;
+  dashboardState = { y: window.scrollY, archive, weekOnly,
+    search: document.querySelector("#search")?.value || "",
+    course: document.querySelector("#course-filter")?.value || "" };
+}
+function openRoute(next) {
+  rememberDashboard();
+  route = next;
+  history.pushState({ nugas: true, route, depth: ++navDepth }, "");
+}
+function goBack() {
+  if (navDepth > 0 && history.state?.nugas) history.back();
+  else showDashboard();
+}
+window.addEventListener("popstate", event => {
+  if (!user || !document.querySelector("#view")) return;
+  const state = event.state;
+  navDepth = state?.nugas ? state.depth : 0;
+  route = state?.nugas ? state.route : { kind: "dashboard" };
+  if (route.kind === "detail") {
+    const task = tasks.find(t => t.id === route.id);
+    if (task) { swapView(() => renderDetail(task), "back"); return; }
+  }
+  if (route.kind === "form") {
+    editingTask = tasks.find(t => t.id === route.id) || null;
+    swapView(() => renderForm(editingTask), "back");
+    return;
+  }
+  route = { kind: "dashboard" };
+  swapView(renderDashboard, "back");
+});
 let sessionSyncToken = 0;
 let sessionLoading = false;
 
@@ -40,6 +77,11 @@ const courseName = (value) =>
     .trim()
     .replace(/\s+/g, " ")
     .toUpperCase();
+const courseCardLabel = (course, type) => {
+  const name = courseName(course);
+  const short = name.length > 22 ? `${name.slice(0, 21).trimEnd()}…` : name;
+  return `${short} · ${type}`;
+};
 const localDate = (value) =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -256,41 +298,21 @@ function toggleProfile() {
   avatar.setAttribute("aria-expanded", String(!menu.hidden));
 }
 
-async function swapView(render, direction = "forward") {
+function swapView(render, direction = "forward") {
   const view = document.querySelector("#view");
   const token = ++viewToken;
-  view.getAnimations().forEach((animation) => animation.cancel());
-  try {
-    if (view.innerHTML && !isReduced())
-      await view.animate(
-        [
-          { opacity: 1, transform: "translateY(0)", filter: "blur(0)" },
-          {
-            opacity: 0,
-            transform:
-              direction === "back" ? "translateY(6px)" : "translateY(-6px)",
-            filter: "blur(2px)",
-          },
-        ],
-        { duration: 130, easing: "ease-in", fill: "forwards" },
-      ).finished;
-    if (token !== viewToken) return;
-    render();
-    if (!isReduced())
-      await view.animate(
-        [
-          {
-            opacity: 0,
-            transform:
-              direction === "back" ? "translateY(-9px)" : "translateY(12px)",
-            filter: "blur(3px)",
-          },
-          { opacity: 1, transform: "translateY(0)", filter: "blur(0)" },
-        ],
-        { duration: 360, easing: "cubic-bezier(.16,1,.3,1)" },
-      ).finished;
-  } finally {
-    view.getAnimations().forEach((a) => a.cancel());
+  view.getAnimations().forEach(a => a.cancel());
+  view.style.transform = "";
+  render();
+  window.scrollTo(0, route.kind === "dashboard" ? dashboardState.y : 0);
+  if (!isReduced() && view.animate) {
+    const animation = view.animate([
+      { opacity: 0.6, transform: direction === "back" ? "translateX(-22px)" : "translateX(32px)" },
+      { opacity: 1, transform: "translateX(0)" }
+    ], { duration: 260, easing: "cubic-bezier(.16,1,.3,1)" });
+    animation.finished.catch(() => {}).finally(() => {
+      if (token === viewToken) animation.cancel();
+    });
   }
 }
 
@@ -321,28 +343,34 @@ function courseList() {
 }
 
 function showDashboard() {
-  archive = false;
-  weekOnly = false;
+  if (route.kind === "dashboard") rememberDashboard();
+  route = { kind: "dashboard" };
+  history.replaceState({ nugas: true, route, depth: navDepth }, "");
   swapView(renderDashboard, "back");
 }
 function renderDashboard() {
+  archive = dashboardState.archive;
+  weekOnly = dashboardState.weekOnly;
   const active = tasks.filter((t) => !t.completed_at);
   const count = weekCount();
   const view = document.querySelector("#view");
   view.innerHTML = `<section class="dashboard"><div class="hero"><div><div class="date-line">${new Intl.DateTimeFormat("id-ID", { timeZone, weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date())}</div><div class="count">${active.length}</div><h1>Tugas belum dikumpulkan</h1></div><button class="primary add-button" id="add">+ Tambah tugas</button></div><button class="deadline-banner ${count === 0 ? "zero" : ""}" id="week-banner" ${count === 0 ? "disabled" : ""}>${count === 0 ? `<b>0 TUGAS DEADLINE MINGGU INI</b>` : `<span><b>${count} TUGAS DEADLINE MINGGU INI</b><small>Lihat yang perlu dikumpulkan</small></span><span>↗</span>`}</button><div class="tabs"><button id="active-tab" class="active">Tugas aktif</button><button id="archive-tab">Arsip · ${tasks.filter((t) => t.completed_at).length}</button></div><div id="tab-area"><div class="tools"><input id="search" type="search" placeholder="Cari tugas…" aria-label="Cari tugas"><select id="course-filter" aria-label="Filter mata kuliah"><option value="">Semua mata kuliah</option>${courseList()
     .map((c) => `<option value="${esc(c)}">${esc(c)}</option>`)
     .join("")}</select></div><div id="list"></div></div></section>`;
+  document.querySelector("#search").value = dashboardState.search;
+  document.querySelector("#course-filter").value = dashboardState.course;
+  document.querySelector("#active-tab").classList.toggle("active", !archive);
+  document.querySelector("#archive-tab").classList.toggle("active", archive);
+  if (weekOnly) {
+    document.querySelector("#week-banner").innerHTML = '<b class="all-tasks">Tampilkan semua tugas</b><span>↗</span>';
+    document.querySelector("#week-banner").classList.add("all");
+  }
   document.querySelector("#add").onclick = () => showForm();
   document.querySelector("#week-banner").onclick = () => {
     weekOnly = !weekOnly;
-    document.querySelector("#week-banner").innerHTML =
-      `<b class="all-tasks">Tampilkan semua tugas</b><span>↗</span>`;
-    document.querySelector("#week-banner").classList.add("all");
-    renderList();
-    document.querySelector("#week-banner").onclick = () => {
-      weekOnly = false;
-      renderDashboard();
-    };
+    archive = false;
+    rememberDashboard();
+    renderDashboard();
   };
   document.querySelector("#active-tab").onclick = () => switchArchive(false);
   document.querySelector("#archive-tab").onclick = () => switchArchive(true);
@@ -404,7 +432,7 @@ function renderList() {
     ? selected
         .map(
           (t) =>
-            `<button class="task-card ${urgency(t)}" data-id="${t.id}"><span class="task-main"><strong>${esc(t.title)}</strong><span class="course"><span class="course-name" title="${esc(courseName(t.course))}">${esc(courseName(t.course))}</span><span class="task-type"> · ${esc(t.task_type)}</span></span>${t.task_type === "Kelompok" && t.members ? `<span class="members">${esc(membersShort(t.members))}</span>` : ""}</span><span class="status ${statusClass(t)}">${t.completed_at ? "✓ Sudah dikumpulkan" : esc(t.status)}</span><span class="due"><b>${!t.completed_at && daysUntil(t) <= 4 ? "⚠️ " : ""}${deadlineText(t)}</b><small>${timeLabel(t.deadline_at)}</small></span></button>`,
+            `<button class="task-card ${urgency(t)}" data-id="${t.id}"><span class="task-main"><strong>${esc(t.title)}</strong><span class="course" title="${esc(courseName(t.course))}">${esc(courseCardLabel(t.course, t.task_type))}</span>${t.task_type === "Kelompok" && t.members ? `<span class="members">${esc(membersShort(t.members))}</span>` : ""}</span><span class="status ${statusClass(t)}">${t.completed_at ? "✓ Sudah dikumpulkan" : esc(t.status)}</span><span class="due"><b>${!t.completed_at && daysUntil(t) <= 4 ? "⚠️ " : ""}${deadlineText(t)}</b><small>${timeLabel(t.deadline_at)}</small></span></button>`,
         )
         .join("")
     : `<div class="empty">${archive ? "Belum ada tugas di arsip." : "Belum ada tugas di sini."}</div>`;
@@ -415,13 +443,16 @@ function renderList() {
 
 function showDetail(id) {
   const task = tasks.find((t) => t.id === id);
-  if (task) swapView(() => renderDetail(task));
+  if (task) {
+    openRoute({ kind: "detail", id });
+    swapView(() => renderDetail(task));
+  }
 }
 function renderDetail(task) {
   const complete = Boolean(task.completed_at);
   const view = document.querySelector("#view");
   view.innerHTML = `<div class="detail-nav"><button class="back" id="back" aria-label="Kembali">‹</button><button id="edit">Edit</button></div><article class="detail-card"><div class="eyebrow">${esc(task.task_type)}</div><h1>${esc(task.title)}</h1><p class="course-full">${esc(courseName(task.course))}</p><div class="facts ${complete ? "archive-facts" : ""}"><div><span>Tanggal ditugaskan</span><b>${dateLabel(task.assigned_date)}</b></div><div><span>Deadline</span><b>${dateTimeLabel(task.deadline_at)}</b></div>${complete ? `<div><span>Ditandai selesai</span><b>${dateTimeLabel(task.completed_at)}</b></div>` : ""}</div>${task.task_type === "Kelompok" && task.members ? `<div class="detail-block"><span>Anggota kelompok</span><p>${esc(task.members)}</p></div>` : ""}${!complete ? `<label class="status-field">Status<select id="status"><option ${task.status === "Belum mulai" ? "selected" : ""}>Belum mulai</option><option ${task.status === "Dikerjakan" ? "selected" : ""}>Dikerjakan</option><option ${task.status === "Siap dikumpulkan" ? "selected" : ""}>Siap dikumpulkan</option></select></label>` : ""}<div class="detail-block"><span>Catatan</span><p class="note">${linkify(task.notes)}</p></div><div class="detail-actions">${complete ? `<button id="restore">Kembalikan ke tugas aktif</button>` : `<div><small>Tandai setelah submit di Binusmaya</small><button class="primary complete" id="complete">Tandai sudah dikumpulkan</button></div>`}</div>${complete ? `<div class="delete-area" id="delete-area"><button class="danger" id="delete">Hapus permanen</button></div>` : ""}</article>`;
-  document.querySelector("#back").onclick = showDashboard;
+  document.querySelector("#back").onclick = goBack;
   document.querySelector("#edit").onclick = () => showForm(task);
   if (!complete)
     document.querySelector("#status").onchange = (e) =>
@@ -434,6 +465,7 @@ function renderDetail(task) {
 }
 
 function showForm(task = null) {
+  openRoute({ kind: "form", id: task?.id || null });
   editingTask = task;
   swapView(() => renderForm(task));
 }
@@ -461,8 +493,7 @@ function renderForm(task) {
     task?.[field] ?? draft[field] ?? fallback;
   const type = value("task_type", "Individual");
   view.innerHTML = `<div class="detail-nav"><button class="back" id="back" aria-label="Kembali">‹</button></div><article class="detail-card form-card"><h1>${isEdit ? "Edit tugas" : `Nugas apa lagi nih, ${esc(profileName())}?`}</h1><form id="task-form"><div class="form-grid"><label>Nama tugas<input name="title" maxlength="180" required value="${esc(value("title"))}" placeholder="Contoh: laporan observasi"></label><label>Mata kuliah<input name="course" maxlength="120" required value="${esc(value("course"))}" placeholder="Contoh: Algorithm and Programming"></label><label>Tanggal ditugaskan<input name="assigned_date" type="date" required value="${esc(value("assigned_date", today()))}"></label><label>Deadline (WIB)<input name="deadline_at" type="datetime-local" required value="${esc(task ? datetimeInput(task.deadline_at) : value("deadline_at"))}"></label><label>Jenis tugas<select name="task_type" id="type"><option ${type === "Individual" ? "selected" : ""}>Individual</option><option ${type === "Kelompok" ? "selected" : ""}>Kelompok</option></select></label><label id="members-wrap" ${type === "Kelompok" ? "" : "hidden"}>Anggota kelompok<input name="members" value="${esc(value("members"))}" placeholder="Pisahkan nama dengan koma"></label></div><label>Catatan<textarea name="notes" rows="4" placeholder="Catatan atau link, misalnya https://www.canva.com/…">${esc(value("notes"))}</textarea></label><button class="primary save" type="submit">${isEdit ? "Simpan perubahan" : "Simpan tugas"}</button></form></article>`;
-  document.querySelector("#back").onclick = () =>
-    isEdit ? showDetail(task.id) : showDashboard();
+  document.querySelector("#back").onclick = goBack;
   const form = document.querySelector("#task-form");
   const saveDraft = () =>
     !isEdit && writeDraft(Object.fromEntries(new FormData(form)));
@@ -643,3 +674,42 @@ if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker.register("/sw.js"),
   );
+
+let edgeSwipe = null;
+const standalone = () => navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+document.addEventListener("touchstart", e => {
+  if (!standalone() || route.kind === "dashboard" || e.touches.length !== 1) return;
+  const touch = e.touches[0];
+  if (touch.clientX > 28 || e.target.closest("input, textarea, select")) return;
+  edgeSwipe = { x: touch.clientX, y: touch.clientY, dx: 0, active: false,
+    view: document.querySelector("#view") };
+}, { passive: true });
+document.addEventListener("touchmove", e => {
+  if (!edgeSwipe) return;
+  const g = edgeSwipe, t = e.touches[0];
+  const dx = t.clientX - g.x, dy = t.clientY - g.y;
+  if (!g.active && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { edgeSwipe = null; return; }
+  if (!g.active && dx > 10 && dx > Math.abs(dy) * 1.4) {
+    g.active = true;
+    g.view.getAnimations().forEach(a => a.cancel());
+  }
+  if (!g.active) return;
+  e.preventDefault();
+  g.dx = Math.max(0, dx);
+  g.view.style.transform = `translateX(${g.dx}px)`;
+}, { passive: false });
+function finishEdgeSwipe(cancelled = false) {
+  const g = edgeSwipe;
+  edgeSwipe = null;
+  if (!g?.active) return;
+  const commit = !cancelled && g.dx > Math.min(120, innerWidth * .3);
+  g.view.style.transform = "";
+  if (commit) goBack();
+  else if (!isReduced()) {
+    const a = g.view.animate([{ transform: `translateX(${g.dx}px)` }, { transform: "translateX(0)" }],
+      { duration: 180, easing: "ease-out" });
+    a.finished.catch(() => {});
+  }
+}
+document.addEventListener("touchend", () => finishEdgeSwipe(), { passive: true });
+document.addEventListener("touchcancel", () => finishEdgeSwipe(true), { passive: true });
