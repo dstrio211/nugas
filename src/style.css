@@ -298,22 +298,28 @@ label select {
   min-width: 0;
 }
 .task-main strong {
-  display: block;
+  display: -webkit-box;
   overflow: hidden;
   font-size: 16px;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .course {
   display: flex;
-  gap: 5px;
   margin-top: 8px;
-  overflow: hidden;
   color: #aeb7b3;
   font-size: 12px;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.course-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-type {
+  flex: none;
 }
 .members {
   display: block;

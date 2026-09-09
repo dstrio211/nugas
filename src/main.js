@@ -404,7 +404,7 @@ function renderList() {
     ? selected
         .map(
           (t) =>
-            `<button class="task-card ${urgency(t)}" data-id="${t.id}"><span class="task-main"><strong>${esc(t.title)}</strong><span class="course">${esc(courseName(t.course))} · ${esc(t.task_type)}</span>${t.task_type === "Kelompok" && t.members ? `<span class="members">${esc(membersShort(t.members))}</span>` : ""}</span><span class="status ${statusClass(t)}">${t.completed_at ? "✓ Sudah dikumpulkan" : esc(t.status)}</span><span class="due"><b>${!t.completed_at && daysUntil(t) <= 4 ? "⚠️ " : ""}${deadlineText(t)}</b><small>${timeLabel(t.deadline_at)}</small></span></button>`,
+            `<button class="task-card ${urgency(t)}" data-id="${t.id}"><span class="task-main"><strong>${esc(t.title)}</strong><span class="course"><span class="course-name" title="${esc(courseName(t.course))}">${esc(courseName(t.course))}</span><span class="task-type"> · ${esc(t.task_type)}</span></span>${t.task_type === "Kelompok" && t.members ? `<span class="members">${esc(membersShort(t.members))}</span>` : ""}</span><span class="status ${statusClass(t)}">${t.completed_at ? "✓ Sudah dikumpulkan" : esc(t.status)}</span><span class="due"><b>${!t.completed_at && daysUntil(t) <= 4 ? "⚠️ " : ""}${deadlineText(t)}</b><small>${timeLabel(t.deadline_at)}</small></span></button>`,
         )
         .join("")
     : `<div class="empty">${archive ? "Belum ada tugas di arsip." : "Belum ada tugas di sini."}</div>`;
