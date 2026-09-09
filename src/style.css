@@ -857,7 +857,10 @@ label select {
     font-size: 13px;
     font-weight: 650;
   }
-  .task-card:has(.members) .status { grid-row: 4; }
+  .task-card:has(.members) .status {
+    grid-row: 4;
+    margin-top: 8px;
+  }
   .task-card:not(:has(.members)) .status {
     margin-top: 8px;
   }
