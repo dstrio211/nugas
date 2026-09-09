@@ -54,13 +54,8 @@ function performHistoryBack() {
   else showDashboard();
 }
 window.addEventListener("popstate", event => {
-  if (backMotion) {
-    const motion = backMotion;
-    // Keep the previous page covering the viewport through render and scroll restoration.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (backMotion === motion) cleanupBackMotion();
-    }));
-  }
+  const motion = backMotion;
+  try {
   if (!user || !document.querySelector("#view")) return;
   const state = event.state;
   navDepth = state?.nugas ? state.depth : 0;
@@ -76,6 +71,10 @@ window.addEventListener("popstate", event => {
   }
   route = { kind: "dashboard" };
   swapView(renderDashboard, "back");
+  } finally {
+    // Signal after destination rendering, without removing the animation layers.
+    requestAnimationFrame(() => requestAnimationFrame(() => motion?.destinationReady?.()));
+  }
 });
 let sessionSyncToken = 0;
 let sessionLoading = false;
@@ -758,10 +757,16 @@ async function settleBackMotion(commit) {
     m.under.animate([{ transform: m.under.style.transform },
       { transform: `translateX(${commit ? 0 : -m.width * .22}px)` }], options)
   ];
-  await Promise.all(animations.map(a => a.finished.catch(() => {})));
+  // Render and restore scroll underneath the opaque layers WHILE they settle.
+  // Previously history.back ran after settling, leaving the compositor no time
+  // to prepare the destination before the cover was removed.
+  const destination = commit ? new Promise(resolve => {
+    m.destinationReady = resolve;
+    performHistoryBack();
+  }) : Promise.resolve();
+  await Promise.all([destination, ...animations.map(a => a.finished.catch(() => {}))]);
   if (backMotion !== m) return;
-  if (commit) performHistoryBack();
-  else cleanupBackMotion();
+  cleanupBackMotion();
 }
 
 let edgeSwipe = null;
